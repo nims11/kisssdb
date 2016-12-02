@@ -1,11 +1,10 @@
 #include "kisssdb.h"
 
-#include <malloc.h>
-#include <string.h>
-#include <stdlib.h>
 /* djb2 hash function
  * Copied from https://github.com/adamierymenko/kissdb/
  */
+
+const uint32_t magic = ('k' << 24) | ('s' << 16) | ('d' << 8) | ('b');
 static uint64_t DB_hash(const void *b,unsigned long len){
     unsigned long i;
     uint64_t hash = 5381;
@@ -56,7 +55,10 @@ int DB_open(DB *db, const char *path){
     if(fseeko(f, 0, SEEK_SET)){fclose(f); return DB_IO_ERROR;}
     else{
         Header header;
-        fread(&header, sizeof(Header), 1, f);
+        if(fread(&header, sizeof(Header), 1, f) != 1){
+            fclose(f);
+            return DB_IO_ERROR;
+        }
         db->size = header.size;
     }
     return 0;
@@ -70,22 +72,25 @@ int DB_add(DB *db, const void *key, uint32_t keysize, const void *value, uint32_
     uint64_t prev_offset;
     if(fseeko(db->f, offset, SEEK_SET)) return DB_IO_ERROR;
     prev_offset = ftello(db->f);
-    fread(&record, sizeof(Record), 1, db->f);
+    if(fread(&record, sizeof(Record), 1, db->f) != 1) return DB_IO_ERROR;
     while(record > 0){
         if(fseeko(db->f, record, SEEK_SET)) return DB_IO_ERROR;
         prev_offset = ftello(db->f);
-        fread(&record, sizeof(Record), 1, db->f);
+        if(fread(&record, sizeof(Record), 1, db->f) != 1) return DB_IO_ERROR;
     }
     fseeko(db->f, 0, SEEK_END);
     offset = ftello(db->f);
     record = 0;
-    fwrite(&record, sizeof(Record), 1, db->f);
-    fwrite(&entry_header, sizeof(EntryHeader), 1, db->f);
-    fwrite(key, keysize, 1, db->f);
-    fwrite(value, valsize, 1, db->f);
-    fseeko(db->f, prev_offset, SEEK_SET);
+    if(
+        fwrite(&record, sizeof(Record), 1, db->f) != 1 || 
+        fwrite(&entry_header, sizeof(EntryHeader), 1, db->f) != 1 || 
+        fwrite(key, keysize, 1, db->f) != 1 || 
+        fwrite(value, valsize, 1, db->f) != 1 || 
+        fseeko(db->f, prev_offset, SEEK_SET) != 0
+      ) return DB_IO_ERROR;
     record = offset;
-    fwrite(&record, sizeof(Record), 1, db->f);
+    if(fwrite(&record, sizeof(Record), 1, db->f) != 1) return DB_IO_ERROR;
+    fflush(db->f);
     return 0;
 }
 
@@ -96,12 +101,12 @@ int DB_get(DB *db, const void *key, uint32_t keysize, void *value){
     uint64_t hash = DB_hash(key, keysize) % db->size;
     uint64_t offset = sizeof(Header) + sizeof(Record)*hash;
     if(fseeko(db->f, offset, SEEK_SET)) return DB_IO_ERROR;
-    fread(&record, sizeof(Record), 1, db->f);
+    if(fread(&record, sizeof(Record), 1, db->f) != 1) return DB_IO_ERROR;
     while(record > 0){
         int match = 1;
         if(fseeko(db->f, record, SEEK_SET)) return DB_IO_ERROR;
-        fread(&record, sizeof(Record), 1, db->f);
-        fread(&entry_header, sizeof(EntryHeader), 1, db->f);
+        if(fread(&record, sizeof(Record), 1, db->f) != 1) return DB_IO_ERROR;
+        if(fread(&entry_header, sizeof(EntryHeader), 1, db->f) != 1) return DB_IO_ERROR;
         if(keysize != entry_header.key_size)continue;
         for(iter = 0 ;iter < keysize && match; iter++){
             char ch = getc(db->f);
@@ -119,58 +124,4 @@ int DB_get(DB *db, const void *key, uint32_t keysize, void *value){
 
 void DB_close(DB *db){
     fclose(db->f);
-}
-
-#define BUFSIZE 4
-char buffer[BUFSIZE];
-int inp_line(char **str, int *cur_size){
-    int len = 0;
-    while(fgets(buffer, sizeof(buffer), stdin)){
-        int buf_len = strlen(buffer);
-        if(buf_len + len + 1 > *cur_size){
-            *cur_size += BUFSIZE;
-            char *extra = (char*)realloc(*str, *cur_size);
-            *str = extra;
-        }
-        strcpy((*str)+len, buffer);
-        len += buf_len;
-        (*str)[len] = 0;
-        if((*str)[len-1] == '\n'){
-            (*str)[len-1] = 0;
-            break;
-        }
-    }
-    return len;
-}
-
-int main(int argc, char **argv){
-    DB db;
-    int cur_key_size = 1;
-    int cur_val_size = 1000000;
-    char *key = malloc(cur_key_size);
-    char *val = malloc(cur_val_size);
-    if(argc == 3){
-        DB_create(argv[1], atoi(argv[2]));
-        DB_open(&db, argv[1]);
-        while(inp_line(&key, &cur_key_size)){
-            inp_line(&val, &cur_val_size);
-            printf("%s -> %s\n", key, val);
-            DB_add(&db, key, strlen(key)+1, val, strlen(val)+1);
-        }
-        DB_close(&db);
-    }else if(argc == 2){
-        DB_open(&db, argv[1]);
-        while(inp_line(&key, &cur_key_size)){
-            printf("%s\n", key);
-            fflush(stdin);
-            if(DB_get(&db, key, strlen(key)+1, val)){
-                printf("\n");
-            }else
-                printf("%s\n", val);
-        }
-        DB_close(&db);
-    }
-    free(key);
-    free(val);
-    return 0;
 }

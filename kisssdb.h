@@ -8,7 +8,7 @@
 #define DB_INVALID_PARAMETER_ERROR 2
 #define DB_KEY_NOT_FOUND 3
 
-const uint32_t magic = ('k' << 24) | ('s' << 16) | ('d' << 8) | ('b');
+extern const uint32_t magic;
 typedef struct {
     FILE *f;
     uint32_t size;
