@@ -121,57 +121,56 @@ void DB_close(DB *db){
     fclose(db->f);
 }
 
+#define BUFSIZE 4
+char buffer[BUFSIZE];
+int inp_line(char **str, int *cur_size){
+    int len = 0;
+    while(fgets(buffer, sizeof(buffer), stdin)){
+        int buf_len = strlen(buffer);
+        if(buf_len + len + 1 > *cur_size){
+            *cur_size += BUFSIZE;
+            char *extra = (char*)realloc(*str, *cur_size);
+            *str = extra;
+        }
+        strcpy((*str)+len, buffer);
+        len += buf_len;
+        (*str)[len] = 0;
+        if((*str)[len-1] == '\n'){
+            (*str)[len-1] = 0;
+            break;
+        }
+    }
+    return len;
+}
+
 int main(int argc, char **argv){
+    DB db;
+    int cur_key_size = 1;
+    int cur_val_size = 1000000;
+    char *key = malloc(cur_key_size);
+    char *val = malloc(cur_val_size);
     if(argc == 3){
-        DB db;
-        char key[1000000];
-        char val[1000000];
         DB_create(argv[1], atoi(argv[2]));
         DB_open(&db, argv[1]);
-        while(fgets(key, sizeof(key), stdin)){
-            fgets(val, sizeof(val), stdin);
-            key[strcspn(key, "\r\n")] = 0;
-            val[strcspn(val, "\r\n")] = 0;
+        while(inp_line(&key, &cur_key_size)){
+            inp_line(&val, &cur_val_size);
+            printf("%s -> %s\n", key, val);
             DB_add(&db, key, strlen(key)+1, val, strlen(val)+1);
         }
         DB_close(&db);
     }else if(argc == 2){
-        DB db;
-        char key[1000000];
-        char val[1000000];
         DB_open(&db, argv[1]);
-        while(fgets(key, sizeof(key), stdin)){
-            key[strcspn(key, "\r\n")] = 0;
+        while(inp_line(&key, &cur_key_size)){
+            printf("%s\n", key);
+            fflush(stdin);
             if(DB_get(&db, key, strlen(key)+1, val)){
                 printf("\n");
             }else
                 printf("%s\n", val);
         }
         DB_close(&db);
-    }else{
-        DB db;
-        char command[10];
-        char key[1000000];
-        char val[1000000];
-        DB_create("/tmp/x.db", 1000081);
-        DB_open(&db, "/tmp/x.db");
-        while(fgets(command, sizeof(command), stdin)){
-            command[strcspn(command, "\r\n")] = 0;
-            if(!strcmp("ADD", command)){
-                fgets(key, sizeof(key), stdin);
-                fgets(val, sizeof(val), stdin);
-                key[strcspn(key, "\r\n")] = 0;
-                val[strcspn(val, "\r\n")] = 0;
-                DB_add(&db, key, strlen(key)+1, val, strlen(val)+1);
-            }else if(!strcmp("GET", command)){
-                fgets(key, sizeof(key), stdin);
-                key[strcspn(key, "\r\n")] = 0;
-                if(DB_get(&db, key, strlen(key)+1, val)){
-                    printf("\n");
-                }else
-                    printf("%s\n", val);
-            }
-        }
-        DB_close(&db);
     }
+    free(key);
+    free(val);
+    return 0;
 }
